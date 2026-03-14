@@ -54,6 +54,8 @@ class RouteOptimizationResponse(BaseModel):
     total_distance_km: float = Field(..., description="Total route distance in km")
     total_time_hours: float = Field(..., description="Total route time in hours")
     total_cost_usd: float = Field(..., description="Total route cost in USD")
+    fuel_liters: Optional[float] = Field(None, description="Estimated fuel consumption in litres")
+    fuel_cost_inr: Optional[int] = Field(None, description="Estimated fuel cost in INR")
     savings_vs_baseline: str = Field(..., description="Savings compared to baseline")
     stops: Optional[List[RouteStop]] = Field(None, description="Detailed stop information")
     status: str = Field(..., description="Response status")

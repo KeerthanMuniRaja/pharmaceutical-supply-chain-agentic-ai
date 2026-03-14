@@ -10,55 +10,78 @@ interface Marker {
   type: 'depot' | 'destination'
 }
 
+export type MapStyle = 'street' | 'satellite' | 'terrain' | 'dark'
+
 interface RouteMapProps {
   markers?: Marker[]
   routePolyline?: [number, number][]
   center?: [number, number]
   zoom?: number
+  mapStyle?: MapStyle
+}
+
+const TILE_LAYERS: Record<MapStyle, { url: string; attribution: string }> = {
+  street: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  },
+  satellite: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP',
+  },
+  terrain: {
+    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a>',
+  },
+  dark: {
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  },
 }
 
 export default function RouteMap({
   markers = [],
   routePolyline = [],
-  center = [35.6892, 51.3890],
-  zoom = 11
+  center = [28.6139, 77.2090], // Default: New Delhi
+  zoom = 5,
+  mapStyle = 'street',
 }: RouteMapProps) {
-  const mapRef = useRef<any>(null)
-  const mapInstanceRef = useRef<any>(null)
-  const layerGroupRef = useRef<any>(null)
+  const mapRef     = useRef<any>(null)
+  const mapInstanceRef  = useRef<any>(null)
+  const layerGroupRef   = useRef<any>(null)
+  const tileLayerRef    = useRef<any>(null)
 
+  // ── Initialise map once ───────────────────────────────────────────────────
   useEffect(() => {
-    // Dynamic import to avoid SSR issues
     const initMap = async () => {
       const L = (await import('leaflet')).default
 
-      // Fix default marker icons
+      // Fix default icon paths
       if ((L.Icon.Default.prototype as any)._getIconUrl) {
         delete (L.Icon.Default.prototype as any)._getIconUrl
       }
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       })
 
       if (!mapRef.current || mapInstanceRef.current) return
 
-      // Init map
       const map = L.map(mapRef.current, {
-        center: center,
-        zoom: zoom,
+        center,
+        zoom,
         zoomControl: true,
       })
 
-      // OpenStreetMap tiles (free, no API key needed)
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 18,
+      const tile = TILE_LAYERS[mapStyle]
+      tileLayerRef.current = L.tileLayer(tile.url, {
+        attribution: tile.attribution,
+        maxZoom: 19,
       }).addTo(map)
 
       mapInstanceRef.current = map
-      layerGroupRef.current = L.layerGroup().addTo(map)
+      layerGroupRef.current  = L.layerGroup().addTo(map)
     }
 
     initMap()
@@ -67,12 +90,31 @@ export default function RouteMap({
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove()
         mapInstanceRef.current = null
-        layerGroupRef.current = null
+        layerGroupRef.current  = null
+        tileLayerRef.current   = null
       }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Update markers and polyline when data changes
+  // ── Swap tile layer when mapStyle changes ─────────────────────────────────
+  useEffect(() => {
+    const swapTile = async () => {
+      if (!mapInstanceRef.current) return
+      const L = (await import('leaflet')).default
+
+      if (tileLayerRef.current) {
+        mapInstanceRef.current.removeLayer(tileLayerRef.current)
+      }
+      const tile = TILE_LAYERS[mapStyle]
+      tileLayerRef.current = L.tileLayer(tile.url, {
+        attribution: tile.attribution,
+        maxZoom: 19,
+      }).addTo(mapInstanceRef.current)
+    }
+    swapTile()
+  }, [mapStyle])
+
+  // ── Update markers + polyline ─────────────────────────────────────────────
   useEffect(() => {
     const updateLayers = async () => {
       if (!mapInstanceRef.current || !layerGroupRef.current) return
@@ -80,41 +122,43 @@ export default function RouteMap({
 
       layerGroupRef.current.clearLayers()
 
-      // Add markers
+      // Draw markers
       markers.forEach((marker, idx) => {
         const isDepot = marker.type === 'depot'
+        const label   = isDepot ? '⊕' : String.fromCharCode(65 + (idx - 1))
+        const color   = isDepot ? '#059669' : '#3B82F6'
 
         const iconHtml = `
           <div style="
-            width: 36px; height: 36px;
-            background: ${isDepot ? '#059669' : '#3B82F6'};
+            width: 38px; height: 38px;
+            background: ${color};
             border: 3px solid white;
             border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-            font-size: 11px;
-            font-weight: 700;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.35);
+            font-size: 13px;
+            font-weight: 800;
             color: white;
-          ">${isDepot ? '⊕' : String.fromCharCode(65 + (idx - 1))}</div>
+          ">${label}</div>
         `
 
         const icon = L.divIcon({
           html: iconHtml,
           className: '',
-          iconSize: [36, 36],
-          iconAnchor: [18, 18],
-          popupAnchor: [0, -18],
+          iconSize:   [38, 38],
+          iconAnchor: [19, 19],
+          popupAnchor:[0, -22],
         })
 
         const m = L.marker(marker.position as LatLngExpression, { icon })
         m.bindPopup(`
-          <div style="font-family: system-ui; min-width: 140px;">
+          <div style="font-family: system-ui; min-width: 160px; padding: 4px 0;">
             <div style="font-weight: 700; font-size: 13px; color: #111;">${marker.label}</div>
-            <div style="font-size: 11px; color: ${isDepot ? '#059669' : '#3B82F6'}; font-weight: 600; margin-top: 2px;">
-              ${isDepot ? '🏭 Depot / Start' : '📦 Delivery Stop'}
+            <div style="font-size: 11px; color: ${color}; font-weight: 600; margin-top: 3px;">
+              ${isDepot ? '🏭 Depot / Start' : '📦 Delivery Stop ' + label}
             </div>
             <div style="font-size: 10px; color: #888; margin-top: 4px;">
-              ${marker.position[0].toFixed(4)}, ${marker.position[1].toFixed(4)}
+              ${marker.position[0].toFixed(4)}°N, ${marker.position[1].toFixed(4)}°E
             </div>
           </div>
         `)
@@ -123,22 +167,28 @@ export default function RouteMap({
 
       // Draw route polyline
       if (routePolyline.length >= 2) {
+        // Animated dashed line
         const polyline = L.polyline(routePolyline as LatLngExpression[], {
-          color: '#10B981',
-          weight: 4,
-          opacity: 0.85,
-          dashArray: '8, 4',
-        }).addTo(mapInstanceRef.current)
-
+          color:     '#10B981',
+          weight:    5,
+          opacity:   0.9,
+          dashArray: '10, 6',
+        })
         layerGroupRef.current.addLayer(polyline)
 
-        // Pan to fit the route
-        mapInstanceRef.current.fitBounds(polyline.getBounds(), { padding: [40, 40] })
+        // Solid backing shadow for contrast on satellite/dark
+        const shadow = L.polyline(routePolyline as LatLngExpression[], {
+          color:   '#065F46',
+          weight:  8,
+          opacity: 0.25,
+        })
+        layerGroupRef.current.addLayer(shadow)
+
+        mapInstanceRef.current.fitBounds(polyline.getBounds(), { padding: [50, 50] })
       } else if (markers.length > 0) {
-        // Fit to markers only
         const bounds = L.latLngBounds(markers.map(m => m.position as LatLngExpression))
         if (bounds.isValid()) {
-          mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50] })
+          mapInstanceRef.current.fitBounds(bounds, { padding: [60, 60] })
         }
       }
     }
@@ -148,7 +198,6 @@ export default function RouteMap({
 
   return (
     <>
-      {/* Leaflet CSS */}
       <link
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -156,7 +205,13 @@ export default function RouteMap({
       />
       <div
         ref={mapRef}
-        style={{ width: '100%', height: '100%', minHeight: '420px', borderRadius: '8px', zIndex: 0 }}
+        style={{
+          width: '100%',
+          height: '100%',
+          minHeight: '420px',
+          borderRadius: '8px',
+          zIndex: 0,
+        }}
       />
     </>
   )
