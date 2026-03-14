@@ -82,6 +82,7 @@ data/*.xls
 *.sqlite3
 mongo-data/
 mongodb/
+auth.db
 
 # Jupyter Notebook
 .ipynb_checkpoints
